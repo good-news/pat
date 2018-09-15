@@ -6,26 +6,34 @@ from sqlalchemy.ext.declarative import DeclarativeMeta
 from decimal import Decimal
 import datetime
 import json
+import time
+import uuid
 
 #Predefined variables that in the future will not be hardcoded
+s3_bucket =  os.environ.get("S3_BUCKET", "pat-etl-testing")
 db_type = "mssql"
 db_library = "pymssql"
-db_username = "pat"
-db_password = ""
-db_location = "swag.cqsbag8dne06.us-east-1.rds.amazonaws.com"
+db_username = "sa"
+db_password = "NewYearNewMe9"
+db_location = "localhost"
 db_port = "1433"
-db_name = "Tester"
+db_name = "AdventureWorks2017"
+schema = "Person"
 
-
+metadata = MetaData()
+if schema is not None:
+    metadata.schema = schema
 #create connection string works for most SQL dbs
 connection_str = "{0}+{1}://{2}:{3}@{4}:{5}/{6}".format(db_type, db_library, db_username,
                                                        db_password, db_location, db_port, db_name)
 #create engine the connection to the databse
 engine = create_engine(connection_str)
 engine.connect()
+
+metadata.reflect(bind=engine, views=True)
 #Create base that grabs all the database automapped info; gets database structure
-Base = automap_base()
-Base.prepare(engine, reflect=True)
+Base = automap_base(metadata=metadata)
+Base.prepare()
 #Create session maker
 Session = scoped_session(sessionmaker(bind=engine))
 #create session instance
@@ -85,22 +93,34 @@ class MyEncoder(json.JSONEncoder):
             return float(obj)
         elif isinstance(obj, datetime.date):
             return obj.strftime("%Y-%m-%dT%H:%M:%S.%Z")
+        elif isinstance(obj, uuid.UUID):
+            return str(obj)
         else:
             return super(MyEncoder, self).default(obj)
 
-def data_generator(sql_items):
+def _data_generator(sql_items):
     for item in sql_items:
         sql_dict = _expand_to_dict({}, ['classes', 'prepare'], item)
         yield json.dumps(sql_dict, cls=MyEncoder) + "\n"
 
-def main():
-    filter_list = [{"field" : "ProductID", "type" : "le", "value" : 2}]
-    table = getattr(Base.classes, "Tester")
+def _create_s3_key(date):
+    key_str = "{0}/{1}/{2}/data_{3}.gz".format(date.strftime('%Y'), date.strftime('%m'),
+                        date.strftime('%d'), date.strftime('%H-%M-%S'))
+    return key_str
+
+def main_handler():
+    filter_list = []
+    table = getattr(Base.classes, "Person")
     sql_items = _sql_query(filter_list, table)
-    gen_data =  data_generator(sql_items)
-    with open('streamed_write.json', 'w') as outfile:
+    gen_data =  _data_generator(sql_items)
+    with io.BytesIO() as outfile:
         for chunk in gen_data:
             outfile.write(chunk)
+        current_date = datetime.datetime.now()
+
+        s3_key = _create_s3_key(current_date)
+        s3_object = s3.Object(s3_bucket, s3_key)
+        s3_object.put(Body=gzip.compress(outfile))
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion : '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: SAM template for PAT
+
+Resources:
+  IngestLambda:
+    Type: "AWS::Serverless::Function"
+    Properties:
+      Runtime: python3.6
+      Handler: sql_connector.main_handler
+      CodeUri: "data_connectors"
+      Timeout: 280
+      MemorySize: 960
+      Tags:
+        Project: serverless-local-test
+
+  MiddlewareLambda:
+    Type: "AWS::Serverless::Function"
+    Properties:
+      Runtime: python3.6
+      Handler: middleware.lambda_handler
+      CodeUri: "middleware"
+      Timeout: 280
+      MemorySize: 960
+      Tags:
+        Project: serverless-local-test
